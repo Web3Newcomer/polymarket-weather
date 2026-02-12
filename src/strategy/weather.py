@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Callable, Awaitable
 
 from ..config import WeatherConfig
 from ..data.noaa_feed import NOAAFeed
@@ -66,10 +66,12 @@ class WeatherPosition:
 class WeatherStrategy:
     """天气交易策略 - 使用 NOAA 预报对抗 Polymarket 天气市场定价"""
 
-    def __init__(self, config: WeatherConfig, noaa_feed: NOAAFeed):
+    def __init__(self, config: WeatherConfig, noaa_feed: NOAAFeed,
+                 price_fetcher: Optional[Callable[[str, str], Awaitable[Optional[Decimal]]]] = None):
         self.config = config
         self.noaa = noaa_feed
         self._forecast_cache: Dict[str, Dict] = {}
+        self._price_fetcher = price_fetcher
 
     async def scan_entries(self, markets: List[Market]) -> List[WeatherSignal]:
         """扫描入场机会"""
@@ -143,7 +145,15 @@ class WeatherStrategy:
                 if not yes_outcome:
                     continue
 
+                # 优先用 CLOB 真实买价，fallback 到 Gamma 概率价
                 price = yes_outcome.price
+                if self._price_fetcher:
+                    try:
+                        clob_price = await self._price_fetcher(yes_outcome.token_id, "buy")
+                        if clob_price is not None and clob_price > 0:
+                            price = clob_price
+                    except Exception as e:
+                        logger.debug(f"CLOB price fetch failed for {market.slug}: {e}")
 
                 # 安全检查
                 ok, reason = self._check_safeguards(price)

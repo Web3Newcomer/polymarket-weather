@@ -33,7 +33,7 @@ class WeatherConfig:
     """天气策略配置"""
     enabled: bool = False
     auto_trade: bool = False            # 自动交易开关，默认关闭（只推送信号）
-    entry_threshold: float = 0.35       # 买入阈值（YES 价格低于此值时买入）
+    entry_threshold: float = 0.25       # 买入阈值（YES 价格低于此值时买入）
     exit_threshold: float = 0.65        # 卖出阈值（YES 价格高于此值时卖出）
     take_profit_pct: float = 0.50       # 止盈比例（50%）
     stop_loss_pct: float = 0.25         # 止损比例（25%）

@@ -159,7 +159,7 @@ POLYMARKET_FUNDER_ADDRESS=your_wallet_address
 # 天气策略
 WEATHER_ENABLED=true                # 启用天气策略
 WEATHER_AUTO_TRADE=false            # 自动交易（默认关闭，仅推送信号）
-WEATHER_ENTRY_THRESHOLD=0.35        # 入场阈值（YES 价格低于此值时买入）
+WEATHER_ENTRY_THRESHOLD=0.25        # 入场阈值（YES 价格低于此值时买入）
 WEATHER_EXIT_THRESHOLD=0.65         # 出场阈值（YES 价格高于此值时卖出）
 WEATHER_TAKE_PROFIT=0.50            # 止盈比例（50%）
 WEATHER_STOP_LOSS=0.25              # 止损比例（25%）
@@ -348,7 +348,7 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 |------|---------|------|--------|
 | 启用策略 | `WEATHER_ENABLED` | 是否启用天气策略 | `false` |
 | 自动交易 | `WEATHER_AUTO_TRADE` | 自动执行交易（关闭则仅推送信号） | `false` |
-| 入场阈值 | `WEATHER_ENTRY_THRESHOLD` | YES 价格低于此值时生成买入信号 | `0.35` |
+| 入场阈值 | `WEATHER_ENTRY_THRESHOLD` | YES 价格低于此值时生成买入信号 | `0.25` |
 | 出场阈值 | `WEATHER_EXIT_THRESHOLD` | YES 价格高于此值时触发出场 | `0.65` |
 | 止盈比例 | `WEATHER_TAKE_PROFIT` | 浮盈达到此比例时止盈 | `0.50` (50%) |
 | 止损比例 | `WEATHER_STOP_LOSS` | 浮亏达到此比例时止损 | `0.25` (25%) |
@@ -422,14 +422,14 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 **保守策略（推荐新手）：**
 ```bash
 WEATHER_AUTO_TRADE=false        # 先观察信号质量
-WEATHER_ENTRY_THRESHOLD=0.35    # 只在明显低估时提示
+WEATHER_ENTRY_THRESHOLD=0.25    # 只在明显低估时提示
 DRY_RUN=true
 ```
 
 **稳健策略：**
 ```bash
 WEATHER_AUTO_TRADE=true
-WEATHER_ENTRY_THRESHOLD=0.35
+WEATHER_ENTRY_THRESHOLD=0.25
 WEATHER_MAX_POSITION=5
 WEATHER_TAKE_PROFIT=0.50
 WEATHER_STOP_LOSS=0.25

@@ -151,6 +151,10 @@ class Engine:
             return
 
         action_cn = "买入 YES" if signal.action == "BUY" else "卖出"
+        tp_pct = self.config.weather.take_profit_pct
+        sl_pct = self.config.weather.stop_loss_pct
+        tp_price = signal.price * (1 + Decimal(str(tp_pct)))
+        sl_price = signal.price * (1 - Decimal(str(sl_pct)))
         msg = (
             f"🌤️ *天气交易信号*\n\n"
             f"📍 城市: {signal.location}\n"
@@ -158,6 +162,8 @@ class Engine:
             f"🌡️ NOAA预报: {signal.forecast_temp}°F\n"
             f"📊 匹配区间: {signal.bucket_name}\n"
             f"💰 当前价格: ${signal.price}\n"
+            f"🎯 止盈: ${tp_price:.3f} (+{tp_pct:.0%})\n"
+            f"🛑 止损: ${sl_price:.3f} (-{sl_pct:.0%})\n"
             f"📈 建议操作: {action_cn}\n\n"
             f"🔗 [查看市场]({signal.market_url})"
         )
@@ -165,27 +171,39 @@ class Engine:
             self._notified_markets[signal.market_id] = now
             self._save_notify_cache()
 
-    def _send_trade_executed(
-        self, signal: WeatherSignal, shares: Decimal,
+    def _send_trade_combined(
+        self, signal: WeatherSignal, shares: Decimal, avg_price: Decimal,
         take_profit: Decimal, stop_loss: Decimal
     ):
-        """推送交易执行结果（仅自动交易模式）"""
+        """推送合并消息：信号 + 交易执行（自动交易模式）"""
         if not self.notifier:
+            return
+
+        # 去重检查
+        now = time.time()
+        last_notify = self._notified_markets.get(signal.market_id, 0)
+        if now - last_notify < self._notify_cooldown:
+            logger.debug(f"Skip duplicate notification for {signal.market_id}")
             return
 
         tp_pct = self.config.weather.take_profit_pct
         sl_pct = self.config.weather.stop_loss_pct
         msg = (
-            f"✅ *交易执行 - 买入*\n\n"
-            f"📍 {signal.location} {signal.date} | {signal.bucket_name}\n"
-            f"💰 买入价: ${signal.price}\n"
+            f"✅ *天气交易 - 买入*\n\n"
+            f"📍 城市: {signal.location}\n"
+            f"📅 日期: {signal.date}\n"
+            f"🌡️ NOAA预报: {signal.forecast_temp}°F\n"
+            f"📊 匹配区间: {signal.bucket_name}\n"
+            f"💰 买入价: ${avg_price:.3f}\n"
             f"📦 数量: {shares:.1f} shares\n"
             f"💵 花费: ${signal.amount}\n"
             f"🎯 止盈: ${take_profit:.3f} (+{tp_pct:.0%})\n"
             f"🛑 止损: ${stop_loss:.3f} (-{sl_pct:.0%})\n\n"
             f"🔗 [查看市场]({signal.market_url})"
         )
-        self.notifier.send(msg)
+        if self.notifier.send(msg):
+            self._notified_markets[signal.market_id] = now
+            self._save_notify_cache()
 
     def _send_exit_result(
         self, position: WeatherPosition, current_price: Decimal, exit_type: str
@@ -248,7 +266,14 @@ class Engine:
 
         # 初始化
         noaa_feed = NOAAFeed()
-        strategy = WeatherStrategy(self.config.weather, noaa_feed)
+
+        async def _fetch_clob_price(token_id: str, side: str) -> Optional[Decimal]:
+            """从 CLOB 获取真实买/卖价"""
+            price_data = await self.order_manager.clob.get_price(token_id, side=side)
+            p = price_data.get("price")
+            return Decimal(str(p)) if p else None
+
+        strategy = WeatherStrategy(self.config.weather, noaa_feed, price_fetcher=_fetch_clob_price)
 
         # 加载已有持仓
         positions = self._load_weather_positions()
@@ -277,10 +302,7 @@ class Engine:
 
                 trades_this_scan = 0
                 for signal in entry_signals:
-                    # 推送信号到 Telegram（两种模式都推）
-                    self._send_weather_signal(signal)
-
-                    # 自动交易模式：执行买入
+                    # 自动交易模式：执行买入，合并推送
                     if self.config.weather.auto_trade:
                         result = await self.order_manager.execute_weather_buy(
                             token_id=signal.token_id,
@@ -305,15 +327,15 @@ class Engine:
                             positions.append(pos)
                             self._save_weather_positions(positions)
 
-                            # 计算止盈止损价格并推送
+                            # 计算止盈止损价格，合并推送信号+交易
                             tp_price = result.avg_price * Decimal(
                                 str(1 + self.config.weather.take_profit_pct)
                             )
                             sl_price = result.avg_price * Decimal(
                                 str(1 - self.config.weather.stop_loss_pct)
                             )
-                            self._send_trade_executed(
-                                signal, result.shares, tp_price, sl_price
+                            self._send_trade_combined(
+                                signal, result.shares, result.avg_price, tp_price, sl_price
                             )
 
                             # 记录敞口
@@ -322,6 +344,9 @@ class Engine:
                             )
                         else:
                             logger.error(f"Weather BUY failed: {result.error}")
+                    else:
+                        # 信号模式：只推送信号
+                        self._send_weather_signal(signal)
 
                 # --- 出场扫描（仅自动交易模式） ---
                 if self.config.weather.auto_trade and positions:
