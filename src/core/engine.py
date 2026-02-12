@@ -13,6 +13,7 @@ from ..data.noaa_feed import NOAAFeed
 from ..execution.risk_manager import RiskManager
 from ..execution.order_manager import OrderManager
 from ..stats.opportunity_tracker import OpportunityTracker
+from ..stats.signal_tracker import SignalTracker, TrackedSignal
 from ..notification.telegram import TelegramNotifier, TelegramConfig
 from ..strategy.weather import WeatherStrategy, WeatherSignal, WeatherPosition
 
@@ -30,6 +31,7 @@ class Engine:
         self.risk_manager = RiskManager(config.risk)
         self.order_manager = OrderManager(config)
         self.tracker = OpportunityTracker()
+        self.signal_tracker = SignalTracker()
         self._running = False
 
         # 初始化 Telegram 通知
@@ -242,6 +244,74 @@ class Engine:
         )
         self.notifier.send(msg)
 
+    def _send_tracking_alert(self, tracked: TrackedSignal, alert_type: str):
+        """推送信号跟踪告警（不走 notify_cache 冷却）"""
+        if not self.notifier:
+            return
+
+        pnl_pct = (tracked.current_price - tracked.signal_price) / tracked.signal_price if tracked.signal_price > 0 else 0
+        hours_ago = (time.time() - tracked.created_at) / 3600
+
+        if pnl_pct >= 0:
+            change_str = f"📈 涨幅: +{pnl_pct:.1%}"
+        else:
+            change_str = f"📉 跌幅: {pnl_pct:.1%}"
+
+        alert_labels = {
+            "take_profit": "🎯 止盈触发!",
+            "stop_loss": "🛑 止损触发!",
+            "big_move_up": "⬆️ 大幅上涨!",
+            "big_move_down": "⬇️ 大幅下跌!",
+            "resolved": "✅ 预测正确! 市场结算 $1.00" if tracked.status == "resolved_win"
+                        else "❌ 预测错误，市场结算 $0.00",
+        }
+        label = alert_labels.get(alert_type, "📊 价格变动")
+
+        msg = (
+            f"📊 *信号跟踪更新*\n\n"
+            f"📍 {tracked.location} | {tracked.date} | {tracked.bucket_name}\n"
+            f"{label}\n"
+            f"💰 信号价: ${tracked.signal_price:.3f} → 当前: ${tracked.current_price:.3f}\n"
+            f"{change_str}\n"
+            f"⏱️ {hours_ago:.0f}小时前\n\n"
+            f"🔗 [查看市场]({tracked.market_url})"
+        )
+        self.notifier.send(msg)
+
+    def _send_daily_summary(self, daily: dict, weekly: dict):
+        """推送每日信号统计"""
+        if not self.notifier:
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        lines = [
+            f"📋 *每日信号统计*",
+            f"📅 {today}\n",
+            f"📊 总信号: {daily['total']}",
+            f"✅ 正确: {daily['wins']} ({daily['win_rate']:.0%})",
+            f"❌ 错误: {daily['losses']}",
+            f"⏳ 待结算: {daily['active']}",
+        ]
+
+        if daily.get("expired", 0) > 0:
+            lines.append(f"⌛ 已过期: {daily['expired']}")
+
+        resolved_count = daily['wins'] + daily['losses'] + daily.get('expired', 0)
+        if resolved_count > 0:
+            lines.append(f"\n💰 平均回报: {daily['avg_return']:+.1%}")
+            if daily.get("best"):
+                b = daily["best"]
+                lines.append(f"🏆 最佳: {b.location} {b.bucket_name} ({b.pnl_pct:+.1%})")
+            if daily.get("worst"):
+                w = daily["worst"]
+                lines.append(f"📉 最差: {w.location} {w.bucket_name} ({w.pnl_pct:+.1%})")
+
+        if weekly["resolved"] > 0:
+            lines.append(f"\n📈 7日胜率: {weekly['win_rate']:.0%} ({weekly['wins']}/{weekly['resolved']})")
+
+        msg = "\n".join(lines)
+        self.notifier.send(msg)
+
     # ------------------------------------------------------------------
     # 天气交易模式
     # ------------------------------------------------------------------
@@ -348,6 +418,28 @@ class Engine:
                         # 信号模式：只推送信号
                         self._send_weather_signal(signal)
 
+                    # 记录信号到跟踪器（两种模式都记录）
+                    self.signal_tracker.add_signal(signal)
+
+                # --- 信号跟踪：更新价格 & 检查告警 ---
+                market_map = {m.condition_id: m for m in all_markets}
+                self.signal_tracker.update_prices(market_map)
+                self.signal_tracker.check_resolutions()
+                self.signal_tracker.check_expirations()
+
+                alerts = self.signal_tracker.check_alerts(self.config.weather)
+                for tracked, alert_type in alerts:
+                    self._send_tracking_alert(tracked, alert_type)
+
+                # 每日统计推送
+                if self.signal_tracker.should_push_summary():
+                    daily = self.signal_tracker.calculate_daily_summary()
+                    weekly = self.signal_tracker.calculate_weekly_summary()
+                    self._send_daily_summary(daily, weekly)
+                    self.signal_tracker.mark_summary_pushed()
+
+                self.signal_tracker.save()
+
                 # --- 出场扫描（仅自动交易模式） ---
                 if self.config.weather.auto_trade and positions:
                     exit_signals = await strategy.scan_exits(positions, all_markets)
@@ -371,6 +463,11 @@ class Engine:
                             self._send_exit_result(
                                 pos, result.avg_price, signal.exit_type
                             )
+                            # 同步标记跟踪信号
+                            self.signal_tracker.mark_resolved(
+                                signal.market_id, float(result.avg_price), signal.exit_type
+                            )
+                            self.signal_tracker.save()
                             # 移除持仓
                             positions = [
                                 p for p in positions
