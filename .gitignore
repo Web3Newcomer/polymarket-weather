@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Environment
+.env
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Project specific
+stats_data/
+weather_positions.json
+notify_cache.json
+
+# Claude
+.claude/
+
+# Parent directory files
+../.DS_Store
+../.agent/
+../.agents/
+../.claude/
+../.codex/
+../.cursor/
+../.gemini/
+../.opencode/
