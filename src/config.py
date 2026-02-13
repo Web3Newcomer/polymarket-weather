@@ -35,7 +35,7 @@ class WeatherConfig:
     auto_trade: bool = False            # 自动交易开关，默认关闭（只推送信号）
     entry_threshold: float = 0.25       # 买入阈值（YES 价格低于此值时买入）
     exit_threshold: float = 0.65        # 卖出阈值（YES 价格高于此值时卖出）
-    take_profit_pct: float = 0.50       # 止盈比例（50%）
+    take_profit_pct: float = 0.30       # 止盈比例（30%）
     stop_loss_pct: float = 0.25         # 止损比例（25%）
     max_position_usd: Decimal = Decimal("5")  # 单笔最大仓位 USD
     max_trades_per_scan: int = 3        # 每次扫描最大交易数
