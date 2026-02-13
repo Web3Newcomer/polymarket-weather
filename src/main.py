@@ -35,6 +35,9 @@ def setup_logging(log_config: LogConfig):
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
+    # 抑制 httpx 日志（含 bot token，无信息量）
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 def parse_args():
     """解析命令行参数"""

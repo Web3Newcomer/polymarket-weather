@@ -68,7 +68,12 @@ class SignalTracker:
     # ------------------------------------------------------------------
 
     def add_signal(self, signal) -> None:
-        """从 WeatherSignal 创建 TrackedSignal"""
+        """从 WeatherSignal 创建 TrackedSignal（同一 market_id active 时不重复记录）"""
+        # 去重：同一市场已有 active 信号则跳过
+        if any(s.market_id == signal.market_id and s.status == "active" for s in self.signals):
+            logger.debug(f"Skip duplicate tracking for {signal.market_id}")
+            return
+
         now = time.time()
         price = float(signal.price)
         tracked = TrackedSignal(

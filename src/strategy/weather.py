@@ -1,4 +1,5 @@
 """天气交易策略"""
+import asyncio
 import re
 import logging
 import time
@@ -93,6 +94,26 @@ class WeatherStrategy:
 
         logger.info(f"Grouped into {len(event_groups)} weather events")
 
+        # 3. 预取所有需要的城市 NOAA 预报（并行请求）
+        needed_locations = set()
+        for event_slug, group in event_groups.items():
+            event_info = self._parse_weather_event(group[0].question)
+            if event_info and event_info["location"] in self.config.locations:
+                needed_locations.add(event_info["location"])
+
+        fetch_locations = [loc for loc in needed_locations if loc not in self._forecast_cache]
+        if fetch_locations:
+            results = await asyncio.gather(
+                *(self.noaa.get_forecast(loc) for loc in fetch_locations),
+                return_exceptions=True,
+            )
+            for loc, result in zip(fetch_locations, results):
+                if isinstance(result, Exception):
+                    logger.warning(f"NOAA fetch failed for {loc}: {result}")
+                    self._forecast_cache[loc] = {}
+                else:
+                    self._forecast_cache[loc] = result
+
         signals: List[WeatherSignal] = []
         trades_count = 0
 
@@ -113,11 +134,8 @@ class WeatherStrategy:
             if location not in self.config.locations:
                 continue
 
-            # 5. 获取 NOAA 预报（带缓存）
-            if location not in self._forecast_cache:
-                self._forecast_cache[location] = await self.noaa.get_forecast(location)
-
-            forecasts = self._forecast_cache[location]
+            # 5. 获取 NOAA 预报（已预取）
+            forecasts = self._forecast_cache.get(location, {})
             day_forecast = forecasts.get(date_str, {})
             forecast_temp = day_forecast.get(metric)
 

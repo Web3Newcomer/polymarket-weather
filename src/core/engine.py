@@ -244,38 +244,39 @@ class Engine:
         )
         self.notifier.send(msg)
 
-    def _send_tracking_alert(self, tracked: TrackedSignal, alert_type: str):
-        """推送信号跟踪告警（不走 notify_cache 冷却）"""
-        if not self.notifier:
+    def _send_tracking_summary(self, alerts: list):
+        """推送信号跟踪汇总（一条消息包含所有告警）"""
+        if not self.notifier or not alerts:
             return
 
-        pnl_pct = (tracked.current_price - tracked.signal_price) / tracked.signal_price if tracked.signal_price > 0 else 0
-        hours_ago = (time.time() - tracked.created_at) / 3600
-
-        if pnl_pct >= 0:
-            change_str = f"📈 涨幅: +{pnl_pct:.1%}"
-        else:
-            change_str = f"📉 跌幅: {pnl_pct:.1%}"
-
         alert_labels = {
-            "take_profit": "🎯 止盈触发!",
-            "stop_loss": "🛑 止损触发!",
-            "big_move_up": "⬆️ 大幅上涨!",
-            "big_move_down": "⬇️ 大幅下跌!",
-            "resolved": "✅ 预测正确! 市场结算 $1.00" if tracked.status == "resolved_win"
-                        else "❌ 预测错误，市场结算 $0.00",
+            "take_profit": "🎯 止盈",
+            "stop_loss": "🛑 止损",
+            "big_move_up": "⬆️ 大涨",
+            "big_move_down": "⬇️ 大跌",
+            "resolved": "✅ 结算",
         }
-        label = alert_labels.get(alert_type, "📊 价格变动")
 
-        msg = (
-            f"📊 *信号跟踪更新*\n\n"
-            f"📍 {tracked.location} | {tracked.date} | {tracked.bucket_name}\n"
-            f"{label}\n"
-            f"💰 信号价: ${tracked.signal_price:.3f} → 当前: ${tracked.current_price:.3f}\n"
-            f"{change_str}\n"
-            f"⏱️ {hours_ago:.0f}小时前\n\n"
-            f"🔗 [查看市场]({tracked.market_url})"
-        )
+        lines = [f"📊 *信号跟踪更新* ({len(alerts)}条)\n"]
+
+        for tracked, alert_type in alerts:
+            pnl_pct = (tracked.current_price - tracked.signal_price) / tracked.signal_price if tracked.signal_price > 0 else 0
+            label = alert_labels.get(alert_type, "📊")
+
+            if alert_type == "resolved":
+                label = "✅ 正确" if tracked.status == "resolved_win" else "❌ 错误"
+
+            if pnl_pct >= 0:
+                change = f"+{pnl_pct:.0%}"
+            else:
+                change = f"{pnl_pct:.0%}"
+
+            lines.append(
+                f"{label} {tracked.location} {tracked.date} {tracked.bucket_name} "
+                f"${tracked.signal_price:.2f}→${tracked.current_price:.2f} ({change})"
+            )
+
+        msg = "\n".join(lines)
         self.notifier.send(msg)
 
     def _send_daily_summary(self, daily: dict, weekly: dict):
@@ -361,7 +362,6 @@ class Engine:
                 # 刷新天气市场（通过 events API 高效获取）
                 await self.market_feed.refresh_weather_markets()
                 all_markets = self.market_feed.get_all_markets()
-                logger.info(f"Loaded {len(all_markets)} markets")
 
                 # 清除预报缓存
                 strategy.clear_cache()
@@ -428,8 +428,8 @@ class Engine:
                 self.signal_tracker.check_expirations()
 
                 alerts = self.signal_tracker.check_alerts(self.config.weather)
-                for tracked, alert_type in alerts:
-                    self._send_tracking_alert(tracked, alert_type)
+                if alerts:
+                    self._send_tracking_summary(alerts)
 
                 # 每日统计推送
                 if self.signal_tracker.should_push_summary():
