@@ -16,6 +16,7 @@ class WeatherTradeResult:
     shares: Decimal = Decimal("0")    # 成交份额
     avg_price: Decimal = Decimal("0")  # 成交均价
     error: str = ""
+    order_id: str = ""                # 限价单 order ID
 
 
 class OrderManager:
@@ -32,13 +33,20 @@ class OrderManager:
         )
 
     async def execute_weather_buy(
-        self, token_id: str, amount: Decimal
+        self, token_id: str, amount: Decimal, price: Decimal = Decimal("0")
     ) -> WeatherTradeResult:
-        """执行天气策略买入（单边 BUY YES）"""
+        """执行天气策略买入（限价 GTC 挂单）
+
+        Args:
+            token_id: YES token ID
+            amount: 买入金额 USD
+            price: 限价（来自扫描时的 CLOB 买价）
+        """
         if self.dry_run:
             try:
-                price_data = await self.clob.get_price(token_id, side="buy")
-                price = Decimal(str(price_data.get("price", "0.10")))
+                if price <= 0:
+                    price_data = await self.clob.get_price(token_id, side="buy")
+                    price = Decimal(str(price_data.get("price", "0.10")))
                 shares = amount / price if price > 0 else Decimal("0")
                 logger.info(
                     f"[DRY RUN] Weather BUY: {shares:.2f} shares @ ${price}"
@@ -54,30 +62,45 @@ class OrderManager:
                     avg_price=Decimal("0.10"),
                 )
 
-        # 真实执行：市价单
-        result = await self.clob.place_market_order(
-            token_id=token_id, side="BUY", size=amount
+        # 真实执行：限价 GTC 挂单
+        if price <= 0:
+            price_data = await self.clob.get_price(token_id, side="buy")
+            price = Decimal(str(price_data.get("price", "0")))
+            if price <= 0:
+                return WeatherTradeResult(success=False, error="Cannot determine price")
+
+        shares = amount / price
+        result = await self.clob.place_order(
+            token_id=token_id, side="BUY", price=price, size=shares, order_type="GTC"
         )
         if result.success:
             logger.info(
-                f"Weather BUY executed: {result.filled_size} shares @ ${result.avg_price}"
+                f"Weather BUY limit order placed: {shares:.2f} shares @ ${price} (order: {result.order_id})"
             )
             return WeatherTradeResult(
                 success=True,
-                shares=result.filled_size,
-                avg_price=result.avg_price,
+                shares=shares,
+                avg_price=price,
+                order_id=result.order_id,
             )
         logger.error(f"Weather BUY failed: {result.error}")
         return WeatherTradeResult(success=False, error=result.error or "Unknown")
 
     async def execute_weather_sell(
-        self, token_id: str, shares: Decimal
+        self, token_id: str, shares: Decimal, price: Decimal = Decimal("0")
     ) -> WeatherTradeResult:
-        """执行天气策略卖出（单边 SELL YES）"""
+        """执行天气策略卖出（限价 GTC 挂单）
+
+        Args:
+            token_id: YES token ID
+            shares: 卖出份额
+            price: 限价（来自当前市场价格）
+        """
         if self.dry_run:
             try:
-                price_data = await self.clob.get_price(token_id, side="sell")
-                price = Decimal(str(price_data.get("price", "0.50")))
+                if price <= 0:
+                    price_data = await self.clob.get_price(token_id, side="sell")
+                    price = Decimal(str(price_data.get("price", "0.50")))
                 logger.info(
                     f"[DRY RUN] Weather SELL: {shares:.2f} shares @ ${price}"
                 )
@@ -90,18 +113,25 @@ class OrderManager:
                     success=True, shares=shares, avg_price=Decimal("0.50")
                 )
 
-        # 真实执行：市价单
-        result = await self.clob.place_market_order(
-            token_id=token_id, side="SELL", size=shares
+        # 真实执行：限价 GTC 挂单
+        if price <= 0:
+            price_data = await self.clob.get_price(token_id, side="sell")
+            price = Decimal(str(price_data.get("price", "0")))
+            if price <= 0:
+                return WeatherTradeResult(success=False, error="Cannot determine price")
+
+        result = await self.clob.place_order(
+            token_id=token_id, side="SELL", price=price, size=shares, order_type="GTC"
         )
         if result.success:
             logger.info(
-                f"Weather SELL executed: {result.filled_size} shares @ ${result.avg_price}"
+                f"Weather SELL limit order placed: {shares:.2f} shares @ ${price} (order: {result.order_id})"
             )
             return WeatherTradeResult(
                 success=True,
-                shares=result.filled_size,
-                avg_price=result.avg_price,
+                shares=shares,
+                avg_price=price,
+                order_id=result.order_id,
             )
         logger.error(f"Weather SELL failed: {result.error}")
         return WeatherTradeResult(success=False, error=result.error or "Unknown")

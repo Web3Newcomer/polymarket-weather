@@ -377,6 +377,7 @@ class Engine:
                         result = await self.order_manager.execute_weather_buy(
                             token_id=signal.token_id,
                             amount=signal.amount,
+                            price=signal.price,
                         )
                         if result.success:
                             trades_this_scan += 1
@@ -457,6 +458,7 @@ class Engine:
                         result = await self.order_manager.execute_weather_sell(
                             token_id=pos.token_id,
                             shares=pos.shares,
+                            price=signal.price,
                         )
                         if result.success:
                             # 推送出场结果
