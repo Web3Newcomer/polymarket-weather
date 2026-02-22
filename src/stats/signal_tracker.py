@@ -6,8 +6,11 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Optional, Tuple
+from pathlib import Path
 
 from ..config import WeatherConfig
+
+_PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 from ..models.market import Market
 
 logger = logging.getLogger(__name__)
@@ -57,7 +60,7 @@ class SignalTracker:
     PRUNE_DAYS = 7
     BIG_MOVE_PCT = 0.20
 
-    def __init__(self, filepath: str = "tracked_signals.json"):
+    def __init__(self, filepath: str = str(_PROJECT_DIR / "tracked_signals.json")):
         self.filepath = filepath
         self.signals: List[TrackedSignal] = []
         self.last_summary_ts: float = 0.0

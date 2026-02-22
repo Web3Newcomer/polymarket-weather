@@ -68,7 +68,7 @@ NOAA 预报 37°F → 匹配区间 "36-37°F" → 当前 YES 价格 $0.48 → �
 ## 系统架构
 
 ```
-polymarket-swing-master/
+polymarket-weather/
 ├── src/
 │   ├── main.py                 # 程序入口
 │   ├── config.py               # 配置管理（环境变量）
@@ -87,7 +87,7 @@ polymarket-swing-master/
 │   │   └── position_tracker.py # 持仓跟踪
 │   ├── notification/
 │   │   └── telegram.py         # Telegram 推送
-│   ├── models/                 # 数据模型（Market, Signal, Order）
+│   ├── models/                 # 数据模型（Market, Order）
 │   └── stats/
 │       ├── opportunity_tracker.py  # 机会统计
 │       └── signal_tracker.py      # 信号跟踪（价格监控 + 结果统计）
@@ -161,9 +161,9 @@ POLYMARKET_FUNDER_ADDRESS=your_wallet_address
 # 天气策略
 WEATHER_ENABLED=true                # 启用天气策略
 WEATHER_AUTO_TRADE=false            # 自动交易（默认关闭，仅推送信号）
-WEATHER_ENTRY_THRESHOLD=0.25        # 入场阈值（YES 价格低于此值时买入）
+WEATHER_ENTRY_THRESHOLD=0.35        # 入场阈值（YES 价格低于此值时买入）
 WEATHER_EXIT_THRESHOLD=0.65         # 出场阈值（YES 价格高于此值时卖出）
-WEATHER_TAKE_PROFIT=0.50            # 止盈比例（50%）
+WEATHER_TAKE_PROFIT=0.30            # 止盈比例（30%）
 WEATHER_STOP_LOSS=0.25              # 止损比例（25%）
 WEATHER_MAX_POSITION=5              # 单笔最大仓位 USD
 WEATHER_MAX_TRADES=3                # 每次扫描最大交易数
@@ -245,8 +245,8 @@ pkill -f "src.main"
 │ 预报匹配   │    │ 遍历持仓      │
 │ 价格<阈值  │    │ 检查当前价格  │
 │     ↓      │    │     ↓        │
-│ 执行买入   │    │ 止盈: +50%   │
-│ 记录持仓   │    │ 止损: -20%   │
+│ 执行买入   │    │ 止盈: +30%   │
+│ 记录持仓   │    │ 止损: -25%   │
 │ Telegram   │    │ 阈值: >$0.45 │
 │ 推送买入   │    │     ↓        │
 │            │    │ 执行卖出     │
@@ -355,7 +355,7 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 告警触发条件：
 | 类型 | 条件 |
 |------|------|
-| 止盈触发 | 涨幅 ≥ 50%（跟随配置） |
+| 止盈触发 | 涨幅 ≥ 30%（跟随配置） |
 | 止损触发 | 跌幅 ≥ 25%（跟随配置） |
 | 大幅上涨 | 涨幅 ≥ 20% |
 | 大幅下跌 | 跌幅 ≥ 20% |
@@ -402,9 +402,9 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 |------|---------|------|--------|
 | 启用策略 | `WEATHER_ENABLED` | 是否启用天气策略 | `false` |
 | 自动交易 | `WEATHER_AUTO_TRADE` | 自动执行交易（关闭则仅推送信号） | `false` |
-| 入场阈值 | `WEATHER_ENTRY_THRESHOLD` | YES 价格低于此值时生成买入信号 | `0.25` |
+| 入场阈值 | `WEATHER_ENTRY_THRESHOLD` | YES 价格低于此值时生成买入信号 | `0.35` |
 | 出场阈值 | `WEATHER_EXIT_THRESHOLD` | YES 价格高于此值时触发出场 | `0.65` |
-| 止盈比例 | `WEATHER_TAKE_PROFIT` | 浮盈达到此比例时止盈 | `0.50` (50%) |
+| 止盈比例 | `WEATHER_TAKE_PROFIT` | 浮盈达到此比例时止盈 | `0.30` (30%) |
 | 止损比例 | `WEATHER_STOP_LOSS` | 浮亏达到此比例时止损 | `0.25` (25%) |
 | 单笔仓位 | `WEATHER_MAX_POSITION` | 单笔最大投入 USD | `5` |
 | 扫描交易数 | `WEATHER_MAX_TRADES` | 每次扫描最多执行交易数 | `3` |
@@ -445,7 +445,7 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 ### 入场条件
 
 1. NOAA 预报温度落在某个温度区间内
-2. 该区间的 YES 价格低于入场阈值（默认 $0.15）
+2. 该区间的 YES 价格低于入场阈值（默认 $0.35）
 3. 价格不低于最小 tick（$0.01）且不高于 $0.99
 4. 未超过每次扫描最大交易数限制
 
@@ -454,7 +454,7 @@ TG_TOPIC_ID=your_topic_id      # 可选，群组话题 ID
 | 条件 | 触发规则 | 说明 |
 |------|---------|------|
 | 止损 | 浮亏 ≥ 25% | 及时止损，控制单笔亏损 |
-| 止盈 | 浮盈 ≥ 50% | 锁定利润 |
+| 止盈 | 浮盈 ≥ 30% | 锁定利润 |
 | 阈值出场 | 价格 ≥ $0.65 | 正常获利了结 |
 
 ### 持仓持久化
@@ -495,7 +495,7 @@ DRY_RUN=true
 WEATHER_AUTO_TRADE=true
 WEATHER_ENTRY_THRESHOLD=0.25
 WEATHER_MAX_POSITION=5
-WEATHER_TAKE_PROFIT=0.50
+WEATHER_TAKE_PROFIT=0.30
 WEATHER_STOP_LOSS=0.25
 DRY_RUN=false
 ```
@@ -506,7 +506,7 @@ WEATHER_AUTO_TRADE=true
 WEATHER_ENTRY_THRESHOLD=0.45
 WEATHER_MAX_POSITION=25
 WEATHER_MAX_TRADES=10
-WEATHER_TAKE_PROFIT=0.30
+WEATHER_TAKE_PROFIT=0.20
 WEATHER_STOP_LOSS=0.15
 DRY_RUN=false
 ```

@@ -145,7 +145,17 @@ class WeatherStrategy:
 
             logger.info(f"NOAA: {location} {date_str} {metric}={forecast_temp}°F")
 
-            # 6. 在该事件的所有市场中找到匹配的温度区间
+            # 6. 检查距结算时间是否足够
+            try:
+                resolve_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                hours_left = (resolve_date - datetime.now(timezone.utc)).total_seconds() / 3600
+                if hours_left < self.config.min_hours_to_resolution:
+                    logger.debug(f"Skip {location} {date_str}: only {hours_left:.1f}h to resolution (min {self.config.min_hours_to_resolution}h)")
+                    continue
+            except ValueError:
+                pass
+
+            # 7. 在该事件的所有市场中找到匹配的温度区间
             for market in group:
                 if trades_count >= self.config.max_trades_per_scan:
                     break
@@ -399,6 +409,9 @@ class WeatherStrategy:
 
         if price_f < self.config.min_tick_size:
             return False, f"Price ${price_f} below min tick ${self.config.min_tick_size}"
+
+        if price_f < self.config.min_entry_price:
+            return False, f"Price ${price_f} below min entry ${self.config.min_entry_price}"
 
         if price_f > (1 - self.config.min_tick_size):
             return False, f"Price ${price_f} above max tradeable"

@@ -42,6 +42,7 @@ class WeatherConfig:
     locations: list = field(default_factory=lambda: ["NYC"])  # 活跃城市
     min_hours_to_resolution: int = 2    # 距结算最少小时数
     min_tick_size: float = 0.01         # 最小可交易价格
+    min_entry_price: float = 0.05       # 最低入场价格（低于此价不开仓）
 
 
 @dataclass
@@ -107,6 +108,7 @@ def load_config() -> Config:
         max_trades_per_scan=int(os.getenv("WEATHER_MAX_TRADES", "3")),
         locations=weather_locations,
         min_hours_to_resolution=int(os.getenv("WEATHER_MIN_HOURS", "2")),
+        min_entry_price=float(os.getenv("WEATHER_MIN_ENTRY_PRICE", "0.05")),
     )
 
     telegram_config = TelegramConfig(

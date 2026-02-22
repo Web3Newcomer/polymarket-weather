@@ -54,7 +54,8 @@ async def main():
     engine = Engine(config)
 
     loop = asyncio.get_event_loop()
-    loop.add_signal_handler(sig.SIGINT, lambda: asyncio.create_task(engine.stop()))
+    for s in (sig.SIGINT, sig.SIGTERM):
+        loop.add_signal_handler(s, lambda: asyncio.create_task(engine.stop()))
 
     await engine.run_weather()
 

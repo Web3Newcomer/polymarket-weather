@@ -5,9 +5,12 @@ import logging
 import time
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import List, Optional, Dict
 
 from ..config import Config
+
+_PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 from ..data.market_feed import MarketFeed
 from ..data.noaa_feed import NOAAFeed
 from ..execution.risk_manager import RiskManager
@@ -19,7 +22,7 @@ from ..strategy.weather import WeatherStrategy, WeatherSignal, WeatherPosition
 
 logger = logging.getLogger(__name__)
 
-WEATHER_POSITIONS_FILE = "weather_positions.json"
+WEATHER_POSITIONS_FILE = str(_PROJECT_DIR / "weather_positions.json")
 
 
 class Engine:
@@ -48,7 +51,7 @@ class Engine:
 
         # 推送去重缓存 {market_id: timestamp}
         self._notify_cooldown = 6 * 3600  # 6小时冷却
-        self._notify_cache_file = "notify_cache.json"
+        self._notify_cache_file = str(_PROJECT_DIR / "notify_cache.json")
         self._notified_markets: Dict[str, float] = self._load_notify_cache()
 
         # 睡眠时间配置 (23:00 - 08:00 不扫描)

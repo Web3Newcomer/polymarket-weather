@@ -12,14 +12,11 @@ Weather trading bot for Polymarket prediction markets. Uses NOAA government weat
 # Install dependencies
 pip install -r requirements.txt
 
-# Run in weather trading mode (primary mode, 1-hour scan intervals)
-python -m src.main --mode weather
+# Run weather trading bot (1-hour scan intervals)
+python -m src.main
 
-# Run in polling mode (60-second intervals, legacy arbitrage scan)
-python -m src.main --mode poll
-
-# Run in real-time WebSocket mode (legacy)
-python -m src.main --mode realtime
+# Run with debug logging
+LOG_LEVEL=DEBUG python -m src.main
 
 # Run tests
 pytest tests/
@@ -31,41 +28,47 @@ pytest tests/test_risk_manager.py -k "test_name"  # single test
 
 All config via environment variables loaded from `.env` by `src/config.py`. Key groups:
 
-- **Polymarket API:** `POLY_API_KEY`, `POLY_API_SECRET`, `POLY_PASSPHRASE`, `FUNDER_ADDRESS`
+- **Polymarket API:** `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_PASSPHRASE`, `POLYMARKET_FUNDER_ADDRESS`
 - **Weather strategy:** `WEATHER_ENABLED`, `WEATHER_AUTO_TRADE`, `WEATHER_ENTRY_THRESHOLD`, `WEATHER_EXIT_THRESHOLD`, `WEATHER_TAKE_PROFIT`, `WEATHER_STOP_LOSS`, `WEATHER_MAX_POSITION`, `WEATHER_MAX_TRADES`, `WEATHER_LOCATIONS`, `WEATHER_MIN_HOURS`
-- **Telegram:** `TG_ENABLED`, `TG_BOT_TOKEN`, `TG_CHAT_ID`, `TG_TOPIC_ID`
-- **General:** `DRY_RUN=true` (default)
+- **Telegram:** `TG_BOT_TOKEN`, `TG_CHAT_ID`, `TG_TOPIC_ID` (Telegram is auto-enabled when `TG_BOT_TOKEN` is set)
+- **General:** `DRY_RUN=true` (default), `LOG_LEVEL`, `LOG_FILE`
 
 ## Architecture
 
-**Entry point:** `src/main.py` → parses CLI `--mode` arg → creates `Engine` from config.
+**Entry point:** `src/main.py` → `load_config()` → creates `Engine` → calls `engine.run_weather()`.
 
-**Weather mode data flow:**
+**Main loop (`Engine.run_weather`):** 1-hour scan cycle with sleep-time skip (23:00–08:00). Each cycle: refresh markets → scan entries → track signals → scan exits (auto-trade only). SIGINT triggers graceful `engine.stop()`.
+
+**Data flow:**
 ```
 NOAA Weather API (forecast data)
-  + Polymarket Gamma API (weather market prices)
+  + Polymarket Gamma API (weather market prices via events endpoint)
   → WeatherStrategy (match NOAA forecast to temperature buckets, find underpriced YES tokens)
   → Signal-only: TelegramNotifier (push signal alerts)
-  → Auto-trade: OrderManager (execute buy/sell) + TelegramNotifier (push trade results)
+  → Auto-trade: OrderManager (limit GTC orders) + TelegramNotifier (push trade results)
 ```
 
-**Key directories:**
-- `src/core/engine.py` — Main orchestration: `run_weather()` loop, position persistence, Telegram push methods
-- `src/strategy/weather.py` — Weather strategy: scan entries (NOAA vs market price), scan exits (stop-loss/take-profit/threshold)
-- `src/data/noaa_feed.py` — Async NOAA API client (6 cities: NYC, Chicago, Seattle, Atlanta, Dallas, Miami)
+**Key modules:**
+- `src/core/engine.py` — Orchestration: `run_weather()` loop, position/signal persistence, all Telegram push methods, notify dedup (6h cooldown via `notify_cache.json`)
+- `src/strategy/weather.py` — `WeatherStrategy`: `scan_entries()` (NOAA vs market price), `scan_exits()` (stop-loss/take-profit/threshold). Parses temperature buckets from market questions via regex. NOAA forecasts pre-fetched in parallel per cycle.
+- `src/data/noaa_feed.py` — Async NOAA API client, 2-step fetch (grid lookup → forecast). 6 cities with airport weather stations.
 - `src/data/market_feed.py` — Polymarket Gamma API market data aggregator
-- `src/execution/` — Order execution (`order_manager.py` with weather buy/sell), risk management, position tracking, CLOB client
-- `src/notification/telegram.py` — Telegram push with 6-hour per-market cooldown (persisted to `notify_cache.json`)
-- `src/models/` — Dataclass models for Market, Signal, Order
-- `src/stats/opportunity_tracker.py` — Historical opportunity tracking
+- `src/data/rest_client.py` — Low-level Gamma API REST client
+- `src/execution/order_manager.py` — `execute_weather_buy/sell()` with dry-run support. Uses limit GTC orders via CLOB.
+- `src/execution/clob_client.py` — Polymarket CLOB API client (order placement, price queries)
+- `src/stats/signal_tracker.py` — Tracks all signals post-push: price updates (reuses loaded market data), resolution detection ($1/$0), expiry (24h), alerts (take-profit/stop-loss/big-move), daily summary (09:00 ET). Persisted to `tracked_signals.json`.
+- `src/notification/telegram.py` — Telegram push with markdown formatting
 
-**Weather strategy logic:** NOAA forecasts are ~85% accurate for 1-2 day predictions. Strategy groups Polymarket weather markets by `event_slug`, parses temperature buckets from market questions (e.g. "34-35°F", "36°F or higher"), matches against NOAA forecast, and generates BUY signals when the matching bucket's YES price is below `entry_threshold`. Exit signals trigger on stop-loss, take-profit, or price reaching `exit_threshold`.
-
-**Position persistence:** Open positions saved to `weather_positions.json` for restart recovery.
+**Auto-generated files (gitignored):**
+- `weather_positions.json` — Open positions for restart recovery
+- `tracked_signals.json` — Signal tracking with price history
+- `notify_cache.json` — Telegram push dedup timestamps
 
 ## Conventions
 
-- Async-first: all I/O uses aiohttp/websockets with async/await
-- Comments and docstrings are in Chinese
-- Dataclasses for internal models, Pydantic for API responses
+- Async-first: all I/O uses aiohttp with async/await
+- Comments and docstrings are in Chinese (中文)
+- Dataclasses for all internal models (`WeatherSignal`, `WeatherPosition`, `TrackedSignal`, etc.)
+- Orders use limit GTC (Good-Til-Cancelled) to avoid spread slippage
+- CLOB real buy price preferred over Gamma probability price for entry signals
 - Logging via `RotatingFileHandler` (10MB, 5 backups) to `arbitrage.log`
