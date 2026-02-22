@@ -81,19 +81,27 @@ class ClobClient:
 
     async def get_price(self, token_id: str, side: str = "buy") -> Dict[str, Any]:
         """获取代币价格"""
-        session = await self._get_session()
-        url = f"{CLOB_HOST}/price"
-        params = {"token_id": token_id, "side": side}
-        async with session.get(url, params=params) as resp:
-            return await resp.json()
+        try:
+            session = await self._get_session()
+            url = f"{CLOB_HOST}/price"
+            params = {"token_id": token_id, "side": side}
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                return await resp.json()
+        except Exception as e:
+            logger.warning(f"get_price failed for {token_id}: {e}")
+            return {}
 
     async def get_orderbook(self, token_id: str) -> Dict[str, Any]:
         """获取订单簿"""
-        session = await self._get_session()
-        url = f"{CLOB_HOST}/book"
-        params = {"token_id": token_id}
-        async with session.get(url, params=params) as resp:
-            return await resp.json()
+        try:
+            session = await self._get_session()
+            url = f"{CLOB_HOST}/book"
+            params = {"token_id": token_id}
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                return await resp.json()
+        except Exception as e:
+            logger.warning(f"get_orderbook failed for {token_id}: {e}")
+            return {}
 
     async def place_order(
         self,

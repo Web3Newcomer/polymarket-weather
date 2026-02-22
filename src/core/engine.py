@@ -362,138 +362,134 @@ class Engine:
                     await asyncio.sleep(interval)
                     continue
 
-                # 刷新天气市场（通过 events API 高效获取）
-                await self.market_feed.refresh_weather_markets()
-                all_markets = self.market_feed.get_all_markets()
+                try:
+                    # 刷新天气市场（通过 events API 高效获取）
+                    await self.market_feed.refresh_weather_markets()
+                    all_markets = self.market_feed.get_all_markets()
 
-                # 清除预报缓存
-                strategy.clear_cache()
+                    # 清除预报缓存
+                    strategy.clear_cache()
 
-                # --- 入场扫描 ---
-                entry_signals = await strategy.scan_entries(all_markets)
-                logger.info(f"Entry signals: {len(entry_signals)}")
+                    # --- 入场扫描 ---
+                    entry_signals = await strategy.scan_entries(all_markets)
+                    logger.info(f"Entry signals: {len(entry_signals)}")
 
-                trades_this_scan = 0
-                for signal in entry_signals:
-                    # 自动交易模式：执行买入，合并推送
-                    if self.config.weather.auto_trade:
-                        result = await self.order_manager.execute_weather_buy(
-                            token_id=signal.token_id,
-                            amount=signal.amount,
-                            price=signal.price,
-                        )
-                        if result.success:
-                            trades_this_scan += 1
-                            # 记录持仓
-                            pos = WeatherPosition(
-                                market_id=signal.market_id,
+                    trades_this_scan = 0
+                    for signal in entry_signals:
+                        # 自动交易模式：执行买入，合并推送
+                        if self.config.weather.auto_trade:
+                            result = await self.order_manager.execute_weather_buy(
                                 token_id=signal.token_id,
-                                entry_price=result.avg_price,
-                                shares=result.shares,
-                                cost=signal.amount,
-                                location=signal.location,
-                                date=signal.date,
-                                bucket_name=signal.bucket_name,
-                                market_url=signal.market_url,
-                                market_question=signal.market_question,
-                                created_at=time.time(),
+                                amount=signal.amount,
+                                price=signal.price,
                             )
-                            positions.append(pos)
-                            self._save_weather_positions(positions)
+                            if result.success:
+                                trades_this_scan += 1
+                                pos = WeatherPosition(
+                                    market_id=signal.market_id,
+                                    token_id=signal.token_id,
+                                    entry_price=result.avg_price,
+                                    shares=result.shares,
+                                    cost=signal.amount,
+                                    location=signal.location,
+                                    date=signal.date,
+                                    bucket_name=signal.bucket_name,
+                                    market_url=signal.market_url,
+                                    market_question=signal.market_question,
+                                    created_at=time.time(),
+                                )
+                                positions.append(pos)
+                                self._save_weather_positions(positions)
 
-                            # 计算止盈止损价格，合并推送信号+交易
-                            tp_price = result.avg_price * Decimal(
-                                str(1 + self.config.weather.take_profit_pct)
-                            )
-                            sl_price = result.avg_price * Decimal(
-                                str(1 - self.config.weather.stop_loss_pct)
-                            )
-                            self._send_trade_combined(
-                                signal, result.shares, result.avg_price, tp_price, sl_price
-                            )
+                                tp_price = result.avg_price * Decimal(
+                                    str(1 + self.config.weather.take_profit_pct)
+                                )
+                                sl_price = result.avg_price * Decimal(
+                                    str(1 - self.config.weather.stop_loss_pct)
+                                )
+                                self._send_trade_combined(
+                                    signal, result.shares, result.avg_price, tp_price, sl_price
+                                )
 
-                            # 记录敞口
-                            self.risk_manager.add_exposure(
-                                signal.market_id, signal.amount
-                            )
+                                self.risk_manager.add_exposure(
+                                    signal.market_id, signal.amount
+                                )
+                            else:
+                                logger.error(f"Weather BUY failed: {result.error}")
                         else:
-                            logger.error(f"Weather BUY failed: {result.error}")
-                    else:
-                        # 信号模式：只推送信号
-                        self._send_weather_signal(signal)
+                            # 信号模式：只推送信号
+                            self._send_weather_signal(signal)
 
-                    # 记录信号到跟踪器（两种模式都记录）
-                    self.signal_tracker.add_signal(signal)
+                        # 记录信号到跟踪器（两种模式都记录）
+                        self.signal_tracker.add_signal(signal)
 
-                # --- 信号跟踪：更新价格 & 检查告警 ---
-                market_map = {m.condition_id: m for m in all_markets}
-                self.signal_tracker.update_prices(market_map)
-                self.signal_tracker.check_resolutions()
-                self.signal_tracker.check_expirations()
+                    # --- 信号跟踪：更新价格 & 检查告警 ---
+                    market_map = {m.condition_id: m for m in all_markets}
+                    self.signal_tracker.update_prices(market_map)
+                    self.signal_tracker.check_resolutions()
+                    self.signal_tracker.check_expirations()
 
-                alerts = self.signal_tracker.check_alerts(self.config.weather)
-                if alerts:
-                    self._send_tracking_summary(alerts)
+                    alerts = self.signal_tracker.check_alerts(self.config.weather)
+                    if alerts:
+                        self._send_tracking_summary(alerts)
 
-                # 每日统计推送
-                if self.signal_tracker.should_push_summary():
-                    daily = self.signal_tracker.calculate_daily_summary()
-                    weekly = self.signal_tracker.calculate_weekly_summary()
-                    self._send_daily_summary(daily, weekly)
-                    self.signal_tracker.mark_summary_pushed()
+                    # 每日统计推送
+                    if self.signal_tracker.should_push_summary():
+                        daily = self.signal_tracker.calculate_daily_summary()
+                        weekly = self.signal_tracker.calculate_weekly_summary()
+                        self._send_daily_summary(daily, weekly)
+                        self.signal_tracker.mark_summary_pushed()
 
-                self.signal_tracker.save()
+                    self.signal_tracker.save()
 
-                # --- 出场扫描（仅自动交易模式） ---
-                if self.config.weather.auto_trade and positions:
-                    exit_signals = await strategy.scan_exits(positions, all_markets)
-                    logger.info(f"Exit signals: {len(exit_signals)}")
+                    # --- 出场扫描（仅自动交易模式） ---
+                    if self.config.weather.auto_trade and positions:
+                        exit_signals = await strategy.scan_exits(positions, all_markets)
+                        logger.info(f"Exit signals: {len(exit_signals)}")
 
-                    for signal in exit_signals:
-                        # 找到对应持仓
-                        pos = next(
-                            (p for p in positions if p.market_id == signal.market_id),
-                            None,
-                        )
-                        if not pos:
-                            continue
-
-                        result = await self.order_manager.execute_weather_sell(
-                            token_id=pos.token_id,
-                            shares=pos.shares,
-                            price=signal.price,
-                        )
-                        if result.success:
-                            # 推送出场结果
-                            self._send_exit_result(
-                                pos, result.avg_price, signal.exit_type
+                        for signal in exit_signals:
+                            pos = next(
+                                (p for p in positions if p.market_id == signal.market_id),
+                                None,
                             )
-                            # 同步标记跟踪信号
-                            self.signal_tracker.mark_resolved(
-                                signal.market_id, float(result.avg_price), signal.exit_type
-                            )
-                            self.signal_tracker.save()
-                            # 移除持仓
-                            positions = [
-                                p for p in positions
-                                if p.market_id != signal.market_id
-                            ]
-                            self._save_weather_positions(positions)
+                            if not pos:
+                                continue
 
-                            # 移除敞口
-                            self.risk_manager.remove_exposure(
-                                signal.market_id, pos.cost
+                            result = await self.order_manager.execute_weather_sell(
+                                token_id=pos.token_id,
+                                shares=pos.shares,
+                                price=signal.price,
                             )
-                        else:
-                            logger.error(f"Weather SELL failed: {result.error}")
+                            if result.success:
+                                self._send_exit_result(
+                                    pos, result.avg_price, signal.exit_type
+                                )
+                                self.signal_tracker.mark_resolved(
+                                    signal.market_id, float(result.avg_price), signal.exit_type
+                                )
+                                self.signal_tracker.save()
+                                positions = [
+                                    p for p in positions
+                                    if p.market_id != signal.market_id
+                                ]
+                                self._save_weather_positions(positions)
 
-                # 扫描摘要
-                logger.info(
-                    f"Scan complete: {len(all_markets)} markets, "
-                    f"{len(entry_signals)} entry signals, "
-                    f"{trades_this_scan} trades, "
-                    f"{len(positions)} open positions"
-                )
+                                self.risk_manager.remove_exposure(
+                                    signal.market_id, pos.cost
+                                )
+                            else:
+                                logger.error(f"Weather SELL failed: {result.error}")
+
+                    # 扫描摘要
+                    logger.info(
+                        f"Scan complete: {len(all_markets)} markets, "
+                        f"{len(entry_signals)} entry signals, "
+                        f"{trades_this_scan} trades, "
+                        f"{len(positions)} open positions"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Scan cycle error: {e}", exc_info=True)
 
                 await asyncio.sleep(interval)
 

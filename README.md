@@ -515,11 +515,31 @@ DRY_RUN=false
 
 ## 监控与调试
 
+### 服务管理（systemd）
+
+```bash
+# 查看服务状态
+sudo systemctl status polymarket-weather
+
+# 实时查看服务日志
+sudo journalctl -u polymarket-weather -f
+
+# 重启服务
+sudo systemctl restart polymarket-weather
+
+# 停止服务
+sudo systemctl stop polymarket-weather
+
+# 更新代码并重启
+sudo -u deploy bash -c 'cd /home/deploy/polymarket-weather && git pull && venv/bin/pip install -r requirements.txt'
+sudo systemctl restart polymarket-weather
+```
+
 ### 查看日志
 
 ```bash
-# 实时查看
-tail -f arbitrage.log
+# 实时查看应用日志
+tail -f /home/deploy/polymarket-weather/arbitrage.log
 
 # 只看交易相关
 grep -E "(BUY signal|SELL signal|Weather BUY|Weather SELL|Scan complete)" arbitrage.log

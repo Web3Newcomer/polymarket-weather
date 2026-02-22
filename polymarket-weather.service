@@ -9,7 +9,7 @@ User=deploy
 WorkingDirectory=/home/deploy/polymarket-weather
 EnvironmentFile=/home/deploy/polymarket-weather/.env
 ExecStart=/home/deploy/polymarket-weather/venv/bin/python -m src.main
-Restart=on-failure
+Restart=always
 RestartSec=30
 TimeoutStopSec=15
 
