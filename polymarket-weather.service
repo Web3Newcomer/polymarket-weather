@@ -1,0 +1,17 @@
+[Unit]
+Description=Polymarket Weather Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/home/deploy/polymarket-weather
+EnvironmentFile=/home/deploy/polymarket-weather/.env
+ExecStart=/home/deploy/polymarket-weather/venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
